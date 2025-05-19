@@ -1,5 +1,4 @@
-# michaelesp32
-
+# FINAL PROJECT
 A new Flutter project.
 
 ## Getting Started
