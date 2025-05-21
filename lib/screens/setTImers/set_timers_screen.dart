@@ -444,7 +444,7 @@ class _SetTimeRelaysState extends State<SetTimeRelays> {
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(15, 0, 15, 20),
+          padding: const EdgeInsets.fromLTRB(15, 13, 15, 20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [

@@ -107,7 +107,7 @@ class _SetupState extends State<Setup> {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+      padding: const EdgeInsets.fromLTRB(16, 13, 16, 80),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
