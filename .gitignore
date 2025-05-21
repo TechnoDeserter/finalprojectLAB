@@ -56,3 +56,7 @@ macos/Flutter/GeneratedPluginRegistrant.swift
 /windows/flutter
 /windows/flutter
 /macos/Flutter
+/macos/Flutter
+*.lock
+/windows/flutter
+/windows/flutter
