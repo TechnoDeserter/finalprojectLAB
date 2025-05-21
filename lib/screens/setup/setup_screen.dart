@@ -15,7 +15,7 @@ class Setup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -24,14 +24,14 @@ class Setup extends StatelessWidget {
             style: TextStyle(
               fontSize: 28,
               fontWeight: FontWeight.bold,
-              color: Colors.deepPurple[800],
+              color: Colors.purple[800],
               letterSpacing: 0.5,
             ),
           ),
           const SizedBox(height: 24),
           Card(
             elevation: 4,
-            shadowColor: Colors.deepPurple.withOpacity(0.1),
+            shadowColor: Colors.purple.withOpacity(0.1),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
@@ -49,7 +49,7 @@ class Setup extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w500,
-                          color: Colors.deepPurple,
+                          color: Colors.purple,
                         ),
                       ),
                       Text(
@@ -71,7 +71,7 @@ class Setup extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w500,
-                          color: Colors.deepPurple,
+                          color: Colors.purple,
                         ),
                       ),
                       Text(
@@ -91,13 +91,13 @@ class Setup extends StatelessWidget {
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 24, vertical: 12),
-                        backgroundColor: Colors.deepPurple,
+                        backgroundColor: Colors.purple,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
                         elevation: 2,
-                        shadowColor: Colors.deepPurple.withOpacity(0.3),
+                        shadowColor: Colors.purple.withOpacity(0.3),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
