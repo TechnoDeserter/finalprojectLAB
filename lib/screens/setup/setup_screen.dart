@@ -296,32 +296,45 @@ class _SetupState extends State<Setup> {
         gravity: ToastGravity.BOTTOM,
       );
     } else {
-      Fluttertoast.showToast(
-        msg: "Failed to reconnect, try again or reset",
-        toastLength: Toast.LENGTH_SHORT,
-        gravity: ToastGravity.BOTTOM,
+      setState(() {
+        _isScanning = false;
+        _scanStatus = 'Cannot scan Wi-Fi networks';
+        _accessPoints = [];
+        _selectedSsid = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Wi-Fi scanning not available')),
       );
     }
-    print('Refresh completed: isConnected=${esp32Service.isConnected}');
   }
 
-  void _showIpModal(BuildContext context, ESP32Service esp32Service) {
-    String? errorMessage;
-    bool isValid = isValidIp(_espIpController.text);
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: const Text(
-                'Connect to ESP32',
-                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            'WiFi Settings',
+            style: GoogleFonts.roboto(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: Colors.purple[800],
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 24),
+          Card(
+            elevation: 4,
+            shadowColor: Colors.purple.withOpacity(0.1),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            margin: const EdgeInsets.symmetric(vertical: 8),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   TextField(
