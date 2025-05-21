@@ -32,12 +32,13 @@ dependencies:
     sdk: flutter
   http: ^1.1.0
   shared_preferences: ^2.2.2
-  animate_do: ^3.3.4
+  animate_do: ^4.2.0
   wifi_scan: ^0.4.1+2
   google_fonts: ^6.2.1
-  flutter_speech: ^2.0.1
   permission_handler: ^12.0.0+1
   speech_to_text: ^7.0.0
+  fluttertoast: ^8.2.12
+  provider: ^6.1.5
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

@@ -1,17 +1,8 @@
-/**************************************************
- * Real-Time Operating System (RTOS) Based Relay Control with ESP32
- * SUBMITTED BY: PANCHO, MICHAEL ANGILO SALUDO PANCHO
- * SUBMITTED TO: PROF. MICHAEL T. SAMONTE
- * Modified: Compatible with 30-pin ESP32, JSON responses, static IP, WiFiManager, Serial reset to AP mode, CORS
- * Switch Adaptation: Active-high buttons (HIGH = pressed) with external 10kΩ pull-down resistors, debounced
- **************************************************/
-
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Preferences.h>
 #include <LiquidCrystal_I2C.h>
-#include <WiFiManager.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <ArduinoJson.h>
@@ -33,8 +24,14 @@ const int switchPins[] = {SWITCH1_PIN, SWITCH2_PIN, SWITCH3_PIN, SWITCH4_PIN};
 const int numSwitches = 4;
 const unsigned long DEBOUNCE_DELAY = 50; // Debounce time in ms
 unsigned long lastDebounceTime[numSwitches] = {0};
-int lastButtonState[numSwitches] = {LOW}; // LOW = not pressed (pull-down)
-int buttonState[numSwitches] = {LOW};    // LOW = not pressed (pull-down)
+int lastButtonState[numSwitches] = {LOW};
+int buttonState[numSwitches] = {LOW};
+
+// Scheduling mode variables
+bool schedulingMode = false;
+int selectedRelay = 0; // 0 = none, 1-4 = Relay 1-4
+int selectedParam = 0; // 0 = onHour, 1 = onMinute, 2 = offHour, 3 = offMinute
+int tempOnHour[4], tempOnMinute[4], tempOffHour[4], tempOffMinute[4];
 
 // Initialize I2C LCD (20x4)
 LiquidCrystal_I2C lcd(0x27, 20, 4);
@@ -44,14 +41,7 @@ WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "ntp.pagasa.dost.gov.ph", 28800, 60000);
 
 Preferences preferences;
-WiFiManager wifiManager;
 WebServer server(80);
-
-// Static IP configuration
-IPAddress local_IP(192, 168, 8, 116);
-IPAddress gateway(192, 168, 8, 1);
-IPAddress subnet(255, 255, 255, 0);
-IPAddress primaryDNS(8, 8, 8, 8); // Google DNS
 
 // Time settings for each relay
 int onHour1, onMinute1, offHour1, offMinute1;
@@ -67,6 +57,38 @@ bool relay4State = false;
 
 // Serial input buffer
 String serialInput = "";
+const char* apSSID = "ESP32_Relay_Controller";
+const char* apPassword = "12345678";
+bool isClientConnected = false;
+
+// LCD display functions
+void displayIPAddress(String ip) {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("WiFi Connected");
+  lcd.setCursor(0, 1);
+  lcd.print("IP Address:");
+  lcd.setCursor(0, 2);
+  lcd.print(ip);
+  lcd.setCursor(0, 3);
+  lcd.print("Enter in App");
+  Serial.println("LCD updated with IP: " + ip);
+}
+
+void displayAPMode() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("AP MODE");
+  lcd.setCursor(0, 1);
+  lcd.print("SSID: ");
+  lcd.print(apSSID);
+  lcd.setCursor(0, 2);
+  lcd.print("PASS: ");
+  lcd.print(apPassword);
+  lcd.setCursor(0, 3);
+  lcd.print("IP: 192.168.4.1");
+  Serial.println("LCD updated with AP mode info: SSID=" + String(apSSID) + ", PASS=" + String(apPassword) + ", IP=192.168.4.1");
+}
 
 void sendCorsHeaders() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
@@ -83,6 +105,101 @@ void handleRoot() {
   String output;
   serializeJson(doc, output);
   server.send(200, "application/json", output);
+  isClientConnected = true;
+  Serial.println("App connected via /, displaying sensor data on LCD");
+}
+
+void handleSetWiFi() {
+  sendCorsHeaders();
+  DynamicJsonDocument doc(512);
+  if (!server.hasArg("plain")) {
+    doc["success"] = false;
+    doc["error"] = "No data provided";
+    String output;
+    serializeJson(doc, output);
+    server.send(400, "application/json", output);
+    return;
+  }
+
+  DeserializationError error = deserializeJson(doc, server.arg("plain"));
+  if (error) {
+    doc.clear();
+    doc["success"] = false;
+    doc["error"] = "Invalid JSON";
+    String output;
+    serializeJson(doc, output);
+    server.send(400, "application/json", output);
+    Serial.println("Failed to parse JSON: " + String(error.c_str()));
+    return;
+  }
+
+  String ssid = doc["ssid"];
+  String password = doc["password"];
+
+  if (ssid.isEmpty()) {
+    doc.clear();
+    doc["success"] = false;
+    doc["error"] = "SSID cannot be empty";
+    String output;
+    serializeJson(doc, output);
+    server.send(400, "application/json", output);
+    Serial.println("SSID is empty");
+    return;
+  }
+
+  Serial.println("Attempting to connect to WiFi SSID: " + ssid);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid.c_str(), password.c_str());
+  int attempts = 0;
+  const int maxAttempts = 20;
+  while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
+    delay(500);
+    attempts++;
+    Serial.print(".");
+  }
+  Serial.println();
+
+  doc.clear();
+  if (WiFi.status() == WL_CONNECTED) {
+    String ip = WiFi.localIP().toString();
+    preferences.begin("wifi", false);
+    preferences.putString("ssid", ssid);
+    preferences.putString("password", password);
+    preferences.end();
+    doc["success"] = true;
+    doc["ip"] = ip;
+    doc["ssid"] = ssid;
+    isClientConnected = false;
+    displayIPAddress(ip);
+    Serial.println("Connected to WiFi, IP: " + ip);
+  } else {
+    doc["success"] = false;
+    doc["error"] = "Failed to connect to WiFi";
+    WiFi.disconnect();
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(apSSID, apPassword);
+    displayAPMode();
+    Serial.println("Failed to connect to WiFi, reverted to AP mode, IP: 192.168.4.1");
+  }
+
+  String output;
+  serializeJson(doc, output);
+  server.send(WiFi.status() == WL_CONNECTED ? 200 : 500, "application/json", output);
+}
+
+void handleDisconnect() {
+  sendCorsHeaders();
+  preferences.begin("wifi", false);
+  preferences.clear();
+  preferences.end();
+  WiFi.disconnect();
+  delay(500);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(apSSID, apPassword);
+  isClientConnected = false;
+  displayAPMode();
+  Serial.println("Disconnected and switched to AP mode, IP: 192.168.4.1");
+  server.send(200, "application/json", "{\"success\": true, \"message\": \"Disconnected and switched to AP mode\"}");
 }
 
 void handleSet() {
@@ -174,13 +291,15 @@ void handleSet() {
 
 void handleReset() {
   sendCorsHeaders();
-  wifiManager.resetSettings();
   preferences.begin("wifi", false);
+  preferences.clear();
+  preferences.end();
+  preferences.begin("relay_settings", false);
   preferences.clear();
   preferences.end();
   DynamicJsonDocument doc(256);
   doc["success"] = true;
-  doc["message"] = "WiFi settings reset. Device will restart in AP mode.";
+  doc["message"] = "Settings cleared. Device will restart in AP mode.";
   String output;
   serializeJson(doc, output);
   server.send(200, "application/json", output);
@@ -258,25 +377,138 @@ void handleOptions() {
   server.send(200, "text/plain", "");
 }
 
-void resetToAPMode() {
-  Serial.println("Resetting to AP mode...");
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Resetting to AP...");
-  wifiManager.resetSettings();
-  preferences.begin("wifi", false);
-  preferences.clear();
+void saveSchedule() {
+  preferences.begin("relay_settings", false);
+  preferences.putUInt("R1_onHour", tempOnHour[0]);
+  preferences.putUInt("R1_onMinute", tempOnMinute[0]);
+  preferences.putUInt("R1_offHour", tempOffHour[0]);
+  preferences.putUInt("R1_offMinute", tempOffMinute[0]);
+  preferences.putUInt("R2_onHour", tempOnHour[1]);
+  preferences.putUInt("R2_onMinute", tempOnMinute[1]);
+  preferences.putUInt("R2_offHour", tempOffHour[1]);
+  preferences.putUInt("R2_offMinute", tempOffMinute[1]);
+  preferences.putUInt("R3_onHour", tempOnHour[2]);
+  preferences.putUInt("R3_onMinute", tempOnMinute[2]);
+  preferences.putUInt("R3_offHour", tempOffHour[2]);
+  preferences.putUInt("R3_offMinute", tempOffMinute[2]);
+  preferences.putUInt("R4_onHour", tempOnHour[3]);
+  preferences.putUInt("R4_onMinute", tempOnMinute[3]);
+  preferences.putUInt("R4_offHour", tempOffHour[3]);
+  preferences.putUInt("R4_offMinute", tempOffMinute[3]);
   preferences.end();
-  Serial.println("WiFi settings cleared. Restarting...");
-  lcd.setCursor(0, 1);
-  lcd.print("Restarting...");
-  delay(3000);
-  ESP.restart();
+
+  onHour1 = tempOnHour[0];
+  onMinute1 = tempOnMinute[0];
+  offHour1 = tempOffHour[0];
+  offMinute1 = tempOffMinute[0];
+  onHour2 = tempOnHour[1];
+  onMinute2 = tempOnMinute[1];
+  offHour2 = tempOffHour[1];
+  offMinute2 = tempOffMinute[1];
+  onHour3 = tempOnHour[2];
+  onMinute3 = tempOnMinute[2];
+  offHour3 = tempOffHour[2];
+  offMinute3 = tempOffMinute[2];
+  onHour4 = tempOnHour[3];
+  onMinute4 = tempOnMinute[3];
+  offHour4 = tempOffHour[3];
+  offMinute4 = tempOffMinute[3];
+}
+
+void handleSwitch(int index) {
+  int reading = digitalRead(switchPins[index]);
+
+  if (reading != lastButtonState[index]) {
+    lastDebounceTime[index] = millis();
+  }
+
+  if ((millis() - lastDebounceTime[index]) > DEBOUNCE_DELAY) {
+    if (reading != buttonState[index]) {
+      buttonState[index] = reading;
+      if (buttonState[index] == HIGH) {
+        if (index == 0) {
+          if (!schedulingMode) {
+            schedulingMode = true;
+            selectedRelay = 1;
+            selectedParam = 0;
+            tempOnHour[0] = onHour1; tempOnMinute[0] = onMinute1;
+            tempOffHour[0] = offHour1; tempOffMinute[0] = offMinute1;
+            tempOnHour[1] = onHour2; tempOnMinute[1] = onMinute2;
+            tempOffHour[1] = offHour2; tempOffMinute[1] = offMinute2;
+            tempOnHour[2] = onHour3; tempOnMinute[2] = onMinute3;
+            tempOffHour[2] = offHour3; tempOffMinute[2] = offMinute3;
+            tempOnHour[3] = onHour4; tempOnMinute[3] = onMinute4;
+            tempOffHour[3] = offHour4; tempOffMinute[3] = offMinute4;
+            Serial.println("Entered scheduling mode, Relay 1 selected");
+          } else {
+            selectedRelay++;
+            if (selectedRelay > 4) {
+              schedulingMode = false;
+              selectedRelay = 0;
+              saveSchedule();
+              Serial.println("Exiting scheduling mode, schedule saved");
+            } else {
+              selectedParam = 0;
+              Serial.printf("Selected Relay %d\n", selectedRelay);
+            }
+          }
+        } else if (schedulingMode) {
+          if (index == 1) {
+            selectedParam = (selectedParam + 1) % 4;
+            Serial.printf("Selected parameter: %s\n", 
+              selectedParam == 0 ? "onHour" : 
+              selectedParam == 1 ? "onMinute" : 
+              selectedParam == 2 ? "offHour" : "offMinute");
+          } else if (index == 2) {
+            int relayIndex = selectedRelay - 1;
+            if (selectedParam == 0) {
+              tempOnHour[relayIndex] = (tempOnHour[relayIndex] + 1) % 24;
+            } else if (selectedParam == 1) {
+              tempOnMinute[relayIndex] = (tempOnMinute[relayIndex] + 1) % 60;
+            } else if (selectedParam == 2) {
+              tempOffHour[relayIndex] = (tempOffHour[relayIndex] + 1) % 24;
+            } else if (selectedParam == 3) {
+              tempOffMinute[relayIndex] = (tempOffMinute[relayIndex] + 1) % 60;
+            }
+            Serial.printf("Incremented Relay %d %s to %d\n", 
+              selectedRelay, 
+              selectedParam == 0 ? "onHour" : 
+              selectedParam == 1 ? "onMinute" : 
+              selectedParam == 2 ? "offHour" : "offMinute",
+              selectedParam == 0 ? tempOnHour[relayIndex] :
+              selectedParam == 1 ? tempOnMinute[relayIndex] :
+              selectedParam == 2 ? tempOffHour[relayIndex] : tempOffMinute[relayIndex]);
+          } else if (index == 3) {
+            int relayIndex = selectedRelay - 1;
+            if (selectedParam == 0) {
+              tempOnHour[relayIndex] = (tempOnHour[relayIndex] - 1) < 0 ? 23 : tempOnHour[relayIndex] - 1;
+            } else if (selectedParam == 1) {
+              tempOnMinute[relayIndex] = (tempOnMinute[relayIndex] - 1) < 0 ? 59 : tempOnMinute[relayIndex] - 1;
+            } else if (selectedParam == 2) {
+              tempOffHour[relayIndex] = (tempOffHour[relayIndex] - 1) < 0 ? 23 : tempOffHour[relayIndex] - 1;
+            } else if (selectedParam == 3) {
+              tempOffMinute[relayIndex] = (tempOffMinute[relayIndex] - 1) < 0 ? 59 : tempOffMinute[relayIndex] - 1;
+            }
+            Serial.printf("Decremented Relay %d %s to %d\n", 
+              selectedRelay, 
+              selectedParam == 0 ? "onHour" : 
+              selectedParam == 1 ? "onMinute" : 
+              selectedParam == 2 ? "offHour" : "offMinute",
+              selectedParam == 0 ? tempOnHour[relayIndex] :
+              selectedParam == 1 ? tempOnMinute[relayIndex] :
+              selectedParam == 2 ? tempOffHour[relayIndex] : tempOffMinute[relayIndex]);
+          }
+        }
+      }
+    }
+  }
+
+  lastButtonState[index] = reading;
 }
 
 void setup() {
-  Serial.begin(9600);
-  Wire.begin(); // Uses default I2C pins: SDA=21, SCL=22
+  Serial.begin(115200);
+  Wire.begin();
 
   lcd.init();
   lcd.backlight();
@@ -286,17 +518,17 @@ void setup() {
 
   // Initialize relays (active LOW)
   pinMode(RELAY1_PIN, OUTPUT);
-  digitalWrite(RELAY1_PIN, HIGH); // Off
+  digitalWrite(RELAY1_PIN, HIGH);
   pinMode(RELAY2_PIN, OUTPUT);
-  digitalWrite(RELAY2_PIN, HIGH); // Off
+  digitalWrite(RELAY2_PIN, HIGH);
   pinMode(RELAY3_PIN, OUTPUT);
-  digitalWrite(RELAY3_PIN, HIGH); // Off
+  digitalWrite(RELAY3_PIN, HIGH);
   pinMode(RELAY4_PIN, OUTPUT);
-  digitalWrite(RELAY4_PIN, HIGH); // Off
+  digitalWrite(RELAY4_PIN, HIGH);
 
   // Initialize switches (active-high, external pull-down)
   for (int i = 0; i < numSwitches; i++) {
-    pinMode(switchPins[i], INPUT); // Requires 10kΩ pull-down resistor
+    pinMode(switchPins[i], INPUT);
   }
 
   lcd.setCursor(0, 1);
@@ -308,42 +540,37 @@ void setup() {
   String savedPassword = preferences.getString("password", "");
   preferences.end();
 
-  if (!savedSsid.isEmpty()) {
-    WiFi.config(local_IP, gateway, subnet, primaryDNS);
+  if (savedSsid.length() > 0 && savedPassword.length() > 0) {
+    Serial.println("Attempting to connect to saved WiFi SSID: " + savedSsid);
+    WiFi.mode(WIFI_STA);
     WiFi.begin(savedSsid.c_str(), savedPassword.c_str());
     int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    const int maxAttempts = 20;
+    while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
       delay(500);
       Serial.print(".");
       attempts++;
     }
-  }
-
-  if (WiFi.status() != WL_CONNECTED) {
-    wifiManager.setConfigPortalTimeout(180);
-    wifiManager.setConnectTimeout(30);
-    if (!wifiManager.autoConnect("ESP32_Relay_Controller")) {
-      Serial.println("Failed to connect and hit timeout");
-      lcd.clear();
-      lcd.print("WiFi Connect Failed");
-      lcd.setCursor(0, 1);
-      lcd.print("Restarting...");
-      delay(3000);
-      ESP.restart();
+    Serial.println();
+    if (WiFi.status() == WL_CONNECTED) {
+      String ip = WiFi.localIP().toString();
+      Serial.println("WiFi connected, IP: " + ip);
+      displayIPAddress(ip);
+    } else {
+      Serial.println("Failed to connect to saved WiFi, starting AP mode");
+      WiFi.disconnect();
+      WiFi.mode(WIFI_AP);
+      WiFi.softAP(apSSID, apPassword);
+      Serial.println("AP mode started, IP: 192.168.4.1");
+      displayAPMode();
     }
+  } else {
+    Serial.println("No WiFi credentials found, starting AP mode");
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(apSSID, apPassword);
+    Serial.println("AP mode started, IP: 192.168.4.1");
+    displayAPMode();
   }
-
-  Serial.println("\nConnected to WiFi");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-  Serial.print("SSID: ");
-  Serial.println(WiFi.SSID());
-  lcd.clear();
-  lcd.print("WiFi Connected");
-  lcd.setCursor(0, 1);
-  lcd.print("IP: ");
-  lcd.print(WiFi.localIP());
-  delay(2000);
 
   timeClient.begin();
 
@@ -367,8 +594,11 @@ void setup() {
   preferences.end();
 
   server.on("/", handleRoot);
+  server.on("/setWiFi", HTTP_POST, handleSetWiFi);
+  server.on("/setWiFi", HTTP_OPTIONS, handleOptions);
+  server.on("/disconnect", HTTP_POST, handleDisconnect);
   server.on("/set", HTTP_POST, handleSet);
-  server.on("/reset", handleReset);
+  server.on("/reset", HTTP_POST, handleReset);
   server.on("/toggle", HTTP_POST, handleToggle);
   server.on("/set", HTTP_OPTIONS, handleOptions);
   server.on("/toggle", HTTP_OPTIONS, handleOptions);
@@ -376,58 +606,23 @@ void setup() {
   Serial.println("HTTP server started");
 }
 
-void handleSwitch(int index) {
-  int reading = digitalRead(switchPins[index]);
-
-  // Check if button state changed
-  if (reading != lastButtonState[index]) {
-    lastDebounceTime[index] = millis();
-  }
-
-  // Check if debounce delay has passed
-  if ((millis() - lastDebounceTime[index]) > DEBOUNCE_DELAY) {
-    if (reading != buttonState[index]) {
-      buttonState[index] = reading;
-      // Active-high: HIGH = pressed
-      if (buttonState[index] == HIGH) {
-        // Toggle corresponding relay
-        switch (index) {
-          case 0:
-            relay1State = !relay1State;
-            digitalWrite(RELAY1_PIN, relay1State ? LOW : HIGH);
-            Serial.printf("Button 1 pressed, Relay 1 %s\n", relay1State ? "ON" : "OFF");
-            break;
-          case 1:
-            relay2State = !relay2State;
-            digitalWrite(RELAY2_PIN, relay2State ? LOW : HIGH);
-            Serial.printf("Button 2 pressed, Relay 2 %s\n", relay2State ? "ON" : "OFF");
-            break;
-          case 2:
-            relay3State = !relay3State;
-            digitalWrite(RELAY3_PIN, relay3State ? LOW : HIGH);
-            Serial.printf("Button 3 pressed, Relay 3 %s\n", relay3State ? "ON" : "OFF");
-            break;
-          case 3:
-            relay4State = !relay4State;
-            digitalWrite(RELAY4_PIN, relay4State ? LOW : HIGH);
-            Serial.printf("Button 4 pressed, Relay 4 %s\n", relay4State ? "ON" : "OFF");
-            break;
-        }
-      }
-    }
-  }
-
-  lastButtonState[index] = reading;
-}
-
 void loop() {
-  // Handle serial input for RESET_AP command
   while (Serial.available() > 0) {
     char c = Serial.read();
     if (c == '\n' || c == '\r') {
       serialInput.trim();
-      if (serialInput.equalsIgnoreCase("RESET_AP")) {
-        resetToAPMode();
+      if (serialInput.equalsIgnoreCase("CLEAR_WIFI")) {
+        Serial.println("Clearing WiFi credentials");
+        preferences.begin("wifi", false);
+        preferences.clear();
+        preferences.end();
+        WiFi.disconnect();
+        delay(500);
+        WiFi.mode(WIFI_AP);
+        WiFi.softAP(apSSID, apPassword);
+        isClientConnected = false;
+        Serial.println("Switched to AP mode, IP: 192.168.4.1");
+        displayAPMode();
       }
       serialInput = "";
     } else {
@@ -435,7 +630,6 @@ void loop() {
     }
   }
 
-  // Handle switches
   for (int i = 0; i < numSwitches; i++) {
     handleSwitch(i);
   }
@@ -450,7 +644,7 @@ void loop() {
   updateRelayState(currentHour, currentMinute);
   displayData(currentHour, currentMinute, currentSecond);
 
-  delay(100); // Reduced delay for better responsiveness
+  delay(100);
 }
 
 void updateRelayState(int hour, int minute) {
@@ -491,31 +685,69 @@ String formatTime(int hour, int minute) {
 }
 
 void displayData(int hour, int minute, int second) {
-  String timeStr = "Time: " + formatTime(hour, minute) + ":" + 
-                  (second < 10 ? "0" + String(second) : String(second)) + 
-                  " W:" + (WiFi.status() == WL_CONNECTED ? "ON" : "OFF");
-  String R1Str = "R1ON:" + formatTime(onHour1, onMinute1) + " OFF:" + formatTime(offHour1, offMinute1);
-  String R2Str = "R2ON:" + formatTime(onHour2, onMinute2) + " OFF:" + formatTime(offHour2, offMinute2);
-  String R3Str = "R3ON:" + formatTime(onHour3, onMinute3) + " OFF:" + formatTime(offHour3, offMinute3);
-  String R4Str = "R4ON:" + formatTime(onHour4, onMinute4) + " OFF:" + formatTime(offHour4, offMinute4);
-  String ipStr = "IP: " + WiFi.localIP().toString();
+  static unsigned long lastLCDUpdate = 0;
+  const unsigned long lcdUpdateInterval = 5000;
+  unsigned long currentTime = millis();
 
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print(timeStr.substring(0, 20));
-
-  if (second % 10 < 5) {
-    lcd.setCursor(0, 1);
-    lcd.print(R1Str.substring(0, 20));
-    lcd.setCursor(0, 2);
-    lcd.print(R2Str.substring(0, 20));
-  } else {
-    lcd.setCursor(0, 1);
-    lcd.print(R3Str.substring(0, 20));
-    lcd.setCursor(0, 2);
-    lcd.print(R4Str.substring(0, 20));
+  if (currentTime - lastLCDUpdate < lcdUpdateInterval) {
+    return;
   }
 
-  lcd.setCursor(0, 3);
-  lcd.print(ipStr.substring(0, 20));
+  if (WiFi.getMode() == WIFI_STA && WiFi.status() == WL_CONNECTED && !isClientConnected) {
+    displayIPAddress(WiFi.localIP().toString());
+    Serial.println("LCD displaying IP, waiting for app connection");
+  } else if (WiFi.getMode() == WIFI_AP) {
+    displayAPMode();
+  } else {
+    if (schedulingMode) {
+      String relayStr = "Relay " + String(selectedRelay);
+      String paramStr = selectedParam == 0 ? "ON_HR" : 
+                        selectedParam == 1 ? "ON_MIN" : 
+                        selectedParam == 2 ? "OFF_HR" : "OFF_MIN";
+      int relayIndex = selectedRelay - 1;
+      int value = selectedParam == 0 ? tempOnHour[relayIndex] :
+                  selectedParam == 1 ? tempOnMinute[relayIndex] :
+                  selectedParam == 2 ? tempOffHour[relayIndex] : tempOffMinute[relayIndex];
+      String valueStr = selectedParam % 2 == 0 ? String(value) : (value < 10 ? "0" + String(value) : String(value));
+      
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Edit: " + relayStr + " " + paramStr);
+      lcd.setCursor(0, 1);
+      lcd.print("Value: " + valueStr);
+      lcd.setCursor(0, 2);
+      lcd.print("S1:Next S2:Param");
+      lcd.setCursor(0, 3);
+      lcd.print("S3:+ S4:-");
+    } else {
+      String timeStr = "Time: " + formatTime(hour, minute) + ":" + 
+                      (second < 10 ? "0" + String(second) : String(second)) + 
+                      " W:" + (WiFi.status() == WL_CONNECTED ? "ON" : "OFF");
+      String R1Str = "R1ON:" + formatTime(onHour1, onMinute1) + " OFF:" + formatTime(offHour1, offMinute1);
+      String R2Str = "R2ON:" + formatTime(onHour2, onMinute2) + " OFF:" + formatTime(offHour2, offMinute2);
+      String R3Str = "R3ON:" + formatTime(onHour3, onMinute3) + " OFF:" + formatTime(offHour3, offMinute3);
+      String R4Str = "R4ON:" + formatTime(onHour4, onMinute4) + " OFF:" + formatTime(offHour4, offMinute4);
+      String ipStr = "IP: " + WiFi.localIP().toString();
+
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print(timeStr.substring(0, 20));
+
+      if (second % 10 < 5) {
+        lcd.setCursor(0, 1);
+        lcd.print(R1Str.substring(0, 20));
+        lcd.setCursor(0, 2);
+        lcd.print(R2Str.substring(0, 20));
+      } else {
+        lcd.setCursor(0, 1);
+        lcd.print(R3Str.substring(0, 20));
+        lcd.setCursor(0, 2);
+        lcd.print(R4Str.substring(0, 20));
+      }
+
+      lcd.setCursor(0, 3);
+      lcd.print(ipStr.substring(0, 20));
+    }
+  }
+  lastLCDUpdate = currentTime;
 }
