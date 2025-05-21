@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:google_fonts/google_fonts.dart';
 import 'package:michaelesp32/screens/setTimers/set_timers_screen.dart';
 import 'package:michaelesp32/screens/setup/setup_screen.dart';
 import 'package:michaelesp32/common/widgets/navbar.dart';
@@ -16,8 +17,9 @@ class RelayControlApp extends StatelessWidget {
     return MaterialApp(
       title: 'Relay Control',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        primarySwatch: Colors.purple, // Updated to match purple theme
         useMaterial3: true,
+        textTheme: GoogleFonts.robotoTextTheme(), // Apply GoogleFonts globally
       ),
       debugShowCheckedModeBanner: false,
       home: const RelayControlPage(),
@@ -35,10 +37,9 @@ class RelayControlPage extends StatefulWidget {
 class _RelayControlPageState extends State<RelayControlPage> {
   String esp32Ip = "192.168.8.116";
   String ssid = "Loading...";
-  int _selectedIndex = 0; // Tracks the selected navbar item
+  int _selectedIndex = 0;
 
   List<bool> relayStates = [false, false, false, false];
-
   List<TimeOfDay> onTimes = [
     const TimeOfDay(hour: 8, minute: 0),
     const TimeOfDay(hour: 9, minute: 0),
@@ -60,37 +61,64 @@ class _RelayControlPageState extends State<RelayControlPage> {
 
   Future<void> _fetchInitialData() async {
     try {
-      final response = await http.get(Uri.parse('http://$esp32Ip/'));
+      final response = await http.get(Uri.parse('http://$esp32Ip/')).timeout(
+            const Duration(seconds: 5),
+            onTimeout: () => http.Response('Timeout', 408),
+          );
       if (response.statusCode == 200) {
         setState(() {
           ssid = _extractSSID(response.body);
+        });
+      } else {
+        setState(() {
+          ssid = "Error: HTTP ${response.statusCode}";
         });
       }
     } catch (e) {
       setState(() {
         ssid = "Error connecting";
       });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to fetch initial data: $e')),
+      );
     }
   }
 
   String _extractSSID(String html) {
-    final ssidStart = html.indexOf('SSID: ') + 6;
-    final ssidEnd = html.indexOf('</p>', ssidStart);
-    return html.substring(ssidStart, ssidEnd);
+    try {
+      final ssidStart = html.indexOf('SSID: ') + 6;
+      final ssidEnd = html.indexOf('</p>', ssidStart);
+      return html.substring(ssidStart, ssidEnd);
+    } catch (e) {
+      return "Unknown SSID";
+    }
   }
 
-  Future<void> _selectTime(
-      BuildContext context, int relayIndex, bool isOnTime) async {
-    final TimeOfDay? picked = await showTimePicker(
-      context: context,
-      initialTime: isOnTime ? onTimes[relayIndex] : offTimes[relayIndex],
-    );
-    if (picked != null) {
+  void selectTime(BuildContext context, int relayIndex, bool isOnTime,
+      {TimeOfDay? voiceSelectedTime}) {
+    if (voiceSelectedTime != null) {
       setState(() {
         if (isOnTime) {
-          onTimes[relayIndex] = picked;
+          onTimes[relayIndex] = voiceSelectedTime;
         } else {
-          offTimes[relayIndex] = picked;
+          offTimes[relayIndex] = voiceSelectedTime;
+        }
+      });
+      print('Updated state: onTimes=$onTimes, offTimes=$offTimes');
+    } else {
+      showTimePicker(
+        context: context,
+        initialTime: isOnTime ? onTimes[relayIndex] : offTimes[relayIndex],
+      ).then((picked) {
+        if (picked != null) {
+          setState(() {
+            if (isOnTime) {
+              onTimes[relayIndex] = picked;
+            } else {
+              offTimes[relayIndex] = picked;
+            }
+          });
+          print('Updated state: onTimes=$onTimes, offTimes=$offTimes');
         }
       });
     }
@@ -109,10 +137,15 @@ class _RelayControlPageState extends State<RelayControlPage> {
         'offTime4': _formatTime(offTimes[3]),
       };
 
-      final response = await http.post(
-        Uri.parse('http://$esp32Ip/set'),
-        body: data,
-      );
+      final response = await http
+          .post(
+            Uri.parse('http://$esp32Ip/set'),
+            body: data,
+          )
+          .timeout(
+            const Duration(seconds: 5),
+            onTimeout: () => http.Response('Timeout', 408),
+          );
 
       if (response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -136,6 +169,9 @@ class _RelayControlPageState extends State<RelayControlPage> {
           'relay': (index + 1).toString(),
           'state': value ? '1' : '0',
         },
+      ).timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => http.Response('Timeout', 408),
       );
 
       if (response.statusCode == 200) {
@@ -152,21 +188,33 @@ class _RelayControlPageState extends State<RelayControlPage> {
     }
   }
 
-  Future<void> _resetWiFi() async {
+  Future<void> _resetWiFi(String ssid, String password) async {
     try {
-      final response = await http.get(Uri.parse('http://$esp32Ip/reset'));
+      final response = await http.post(
+        Uri.parse('http://$esp32Ip/reset'),
+        body: {
+          'ssid': ssid,
+          'password': password,
+        },
+      ).timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => http.Response('Timeout', 408),
+      );
+
       if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('WiFi reset requested. ESP32 will restart.')),
-        );
         setState(() {
-          ssid = "Resetting...";
+          this.ssid = ssid;
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('WiFi settings updated: SSID=$ssid')),
+        );
+      } else {
+        throw Exception(
+            'Failed to update WiFi settings: ${response.statusCode}');
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error resetting WiFi: $e')),
+        SnackBar(content: Text('Error updating WiFi: $e')),
       );
     }
   }
@@ -185,15 +233,22 @@ class _RelayControlPageState extends State<RelayControlPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('FINAL PROJECT'),
+        title: Text(
+          'FINAL PROJECT',
+          style: GoogleFonts.roboto(
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
         centerTitle: true,
+        backgroundColor: Colors.purple[600],
       ),
       body: _selectedIndex == 0
           ? SetTimeRelays(
               onTimes: onTimes,
               offTimes: offTimes,
               relayStates: relayStates,
-              selectTime: _selectTime,
+              selectTime: selectTime,
               toggleRelay: _toggleRelay,
               sendSettingsToESP: _sendSettingsToESP,
             )
