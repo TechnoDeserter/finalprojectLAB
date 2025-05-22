@@ -6,7 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:michaelesp32/screens/setTimers/set_timers_screen.dart';
 import 'package:michaelesp32/screens/setup/setup_screen.dart';
 import 'package:michaelesp32/common/widgets/navbar.dart';
-import 'package:michaelesp32/services/esp32_service.dart';
+import 'package:michaelesp32/services/services.dart';
 
 void main() {
   runApp(
@@ -47,56 +47,7 @@ class RelayControlPage extends StatefulWidget {
 class _RelayControlPageState extends State<RelayControlPage> {
   int _selectedIndex = 0;
 
-  List<bool> relayStates = [false, false, false, false];
-  List<TimeOfDay> onTimes = [
-    const TimeOfDay(hour: 8, minute: 0),
-    const TimeOfDay(hour: 9, minute: 0),
-    const TimeOfDay(hour: 10, minute: 0),
-    const TimeOfDay(hour: 11, minute: 0),
-  ];
-  List<TimeOfDay> offTimes = [
-    const TimeOfDay(hour: 18, minute: 0),
-    const TimeOfDay(hour: 19, minute: 0),
-    const TimeOfDay(hour: 20, minute: 0),
-    const TimeOfDay(hour: 21, minute: 0),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-  }
-
-  void selectTime(BuildContext context, int relayIndex, bool isOnTime,
-      {TimeOfDay? voiceSelectedTime}) {
-    if (voiceSelectedTime != null) {
-      setState(() {
-        if (isOnTime) {
-          onTimes[relayIndex] = voiceSelectedTime;
-        } else {
-          offTimes[relayIndex] = voiceSelectedTime;
-        }
-      });
-      print('Updated state: onTimes=$onTimes, offTimes=$offTimes');
-    } else {
-      showTimePicker(
-        context: context,
-        initialTime: isOnTime ? onTimes[relayIndex] : offTimes[relayIndex],
-      ).then((picked) {
-        if (picked != null) {
-          setState(() {
-            if (isOnTime) {
-              onTimes[relayIndex] = picked;
-            } else {
-              offTimes[relayIndex] = picked;
-            }
-          });
-          print('Updated state: onTimes=$onTimes, offTimes=$offTimes');
-        }
-      });
-    }
-  }
-
-  Future<void> _sendSettingsToESP(String ip) async {
+  Future<void> _sendSettingsToESP(String ip, List<TimeOfDay> onTimes, List<TimeOfDay> offTimes) async {
     try {
       final Map<String, String> data = {
         'onTime1': _formatTime(onTimes[0]),
@@ -139,34 +90,9 @@ class _RelayControlPageState extends State<RelayControlPage> {
     }
   }
 
-  Future<void> _toggleRelay(String ip, int index, bool value) async {
+  Future<void> _toggleRelay(ESP32Service esp32Service, int index, bool value) async {
     try {
-      final response = await http
-          .post(
-            Uri.parse('http://$ip/toggle'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'relay': (index + 1).toString(),
-              'state': value ? '1' : '0',
-            }),
-          )
-          .timeout(
-            const Duration(seconds: 5),
-            onTimeout: () => http.Response('Timeout', 408),
-          );
-
-      if (response.statusCode == 200) {
-        final responseData = jsonDecode(response.body);
-        if (responseData['success'] == true) {
-          setState(() {
-            relayStates[index] = value;
-          });
-        } else {
-          throw Exception('Failed to toggle relay: ${responseData['error']}');
-        }
-      } else {
-        throw Exception('Failed to toggle relay: HTTP ${response.statusCode}');
-      }
+      await esp32Service.toggleRelay(index, value);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error toggling relay: $e')),
@@ -182,6 +108,13 @@ class _RelayControlPageState extends State<RelayControlPage> {
     setState(() {
       _selectedIndex = index;
     });
+  }
+
+  Future<void> _handleRefresh(ESP32Service esp32Service) async {
+    await esp32Service.tryReconnect();
+    if (esp32Service.isConnected) {
+      await esp32Service.fetchStatus();
+    }
   }
 
   @override
@@ -200,16 +133,49 @@ class _RelayControlPageState extends State<RelayControlPage> {
             centerTitle: true,
             backgroundColor: Colors.purple[600],
           ),
-          body: _selectedIndex == 0
-              ? SetTimeRelays(
-                  onTimes: onTimes,
-                  offTimes: offTimes,
-                  relayStates: relayStates,
-                  selectTime: selectTime,
-                  toggleRelay: (index, value) => _toggleRelay(esp32Service.esp32IP ?? '192.168.4.1', index, value),
-                  sendSettingsToESP: () => _sendSettingsToESP(esp32Service.esp32IP ?? '192.168.4.1'),
-                )
-              : const Setup(),
+          body: RefreshIndicator(
+            onRefresh: () => _handleRefresh(esp32Service),
+            color: Colors.purple[600],
+            backgroundColor: Colors.white,
+            child: _selectedIndex == 0
+                ? SetTimeRelays(
+                    onTimes: esp32Service.onTimes,
+                    offTimes: esp32Service.offTimes,
+                    relayStates: esp32Service.relayStates,
+                    selectTime: (context, relayIndex, isOnTime, {TimeOfDay? voiceSelectedTime}) {
+                      if (voiceSelectedTime != null) {
+                        if (isOnTime) {
+                          esp32Service.onTimes[relayIndex] = voiceSelectedTime;
+                        } else {
+                          esp32Service.offTimes[relayIndex] = voiceSelectedTime;
+                        }
+                        esp32Service.notifyListeners();
+                      } else {
+                        showTimePicker(
+                          context: context,
+                          initialTime: isOnTime
+                              ? esp32Service.onTimes[relayIndex]
+                              : esp32Service.offTimes[relayIndex],
+                        ).then((picked) {
+                          if (picked != null) {
+                            if (isOnTime) {
+                              esp32Service.onTimes[relayIndex] = picked;
+                            } else {
+                              esp32Service.offTimes[relayIndex] = picked;
+                            }
+                            esp32Service.notifyListeners();
+                          }
+                        });
+                      }
+                    },
+                    toggleRelay: (index, value) => _toggleRelay(esp32Service, index, value),
+                    sendSettingsToESP: () => _sendSettingsToESP(
+                        esp32Service.esp32IP ?? '192.168.4.1',
+                        esp32Service.onTimes,
+                        esp32Service.offTimes),
+                  )
+                : const Setup(),
+          ),
           bottomNavigationBar: NavBar(
             selectedIndex: _selectedIndex,
             onTap: _onNavBarTapped,

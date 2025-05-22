@@ -7,7 +7,7 @@ class SetTimeRelays extends StatefulWidget {
   final List<TimeOfDay> onTimes;
   final List<TimeOfDay> offTimes;
   final List<bool> relayStates;
-  final Function(BuildContext, int, bool) selectTime;
+  final Function(BuildContext, int, bool, {TimeOfDay? voiceSelectedTime}) selectTime;
   final Function(int, bool) toggleRelay;
   final Function() sendSettingsToESP;
 
@@ -236,13 +236,8 @@ class _SetTimeRelaysState extends State<SetTimeRelays> {
           minute >= 0 &&
           minute <= 59) {
         final time = TimeOfDay(hour: hour, minute: minute);
-        widget.selectTime(context, relayNumber, isOnTime);
+        widget.selectTime(context, relayNumber, isOnTime, voiceSelectedTime: time);
         setState(() {
-          if (isOnTime) {
-            widget.onTimes[relayNumber] = time;
-          } else {
-            widget.offTimes[relayNumber] = time;
-          }
           _statusMessage = 'Command processed successfully';
         });
         ScaffoldMessenger.of(context).showSnackBar(
@@ -444,7 +439,7 @@ class _SetTimeRelaysState extends State<SetTimeRelays> {
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
-           padding: const EdgeInsets.fromLTRB(15, 13, 15, 20),
+          padding: const EdgeInsets.fromLTRB(15, 13, 15, 20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [

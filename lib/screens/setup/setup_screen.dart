@@ -152,6 +152,7 @@ class _SetupState extends State<Setup> {
 
     try {
       print('Sending WiFi credentials to http://$ip/setWiFi');
+      _showIpModal(context, esp32Service);
       final response = await http
           .post(
             Uri.parse('http://$ip/setWiFi'),
@@ -161,6 +162,7 @@ class _SetupState extends State<Setup> {
               'password': password,
             }),
           )
+          
           .timeout(const Duration(seconds: 15), onTimeout: () {
         // Handle timeout as a potential success due to AP mode disconnection
         return http.Response('{"success": true, "ip": null}', 200);
@@ -645,7 +647,7 @@ class _SetupState extends State<Setup> {
 class IpAddressInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
-Jon {
+ {
     String text = newValue.text.replaceAll(RegExp(r'[^0-9.]'), '');
     String formatted = '';
     int selectionIndex = newValue.selection.baseOffset;
@@ -675,4 +677,4 @@ Jon {
       selection: TextSelection.collapsed(offset: newSelectionIndex.clamp(0, formatted.length)),
     );
   }
-}
+}}

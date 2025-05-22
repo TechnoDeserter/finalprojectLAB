@@ -376,6 +376,41 @@ void handleToggle() {
   server.send(200, "application/json", output);
 }
 
+void handleGetStatus() {
+  sendCorsHeaders();
+  DynamicJsonDocument doc(1024);
+  doc["success"] = true;
+  JsonArray relays = doc.createNestedArray("relays");
+  
+  JsonObject relay1 = relays.createNestedObject();
+  relay1["relay"] = 1;
+  relay1["state"] = relay1State ? 1 : 0;
+  relay1["onTime"] = formatTime(onHour1, onMinute1);
+  relay1["offTime"] = formatTime(offHour1, offMinute1);
+  
+  JsonObject relay2 = relays.createNestedObject();
+  relay2["relay"] = 2;
+  relay2["state"] = relay2State ? 1 : 0;
+  relay2["onTime"] = formatTime(onHour2, onMinute2);
+  relay2["offTime"] = formatTime(offHour2, offMinute2);
+  
+  JsonObject relay3 = relays.createNestedObject();
+  relay3["relay"] = 3;
+  relay3["state"] = relay3State ? 1 : 0;
+  relay3["onTime"] = formatTime(onHour3, onMinute3);
+  relay3["offTime"] = formatTime(offHour3, offMinute3);
+  
+  JsonObject relay4 = relays.createNestedObject();
+  relay4["relay"] = 4;
+  relay4["state"] = relay4State ? 1 : 0;
+  relay4["onTime"] = formatTime(onHour4, onMinute4);
+  relay4["offTime"] = formatTime(offHour4, offMinute4);
+  
+  String output;
+  serializeJson(doc, output);
+  server.send(200, "application/json", output);
+}
+
 void handleOptions() {
   sendCorsHeaders();
   server.send(200, "text/plain", "");
@@ -604,8 +639,10 @@ void setup() {
   server.on("/set", HTTP_POST, handleSet);
   server.on("/reset", HTTP_POST, handleReset);
   server.on("/toggle", HTTP_POST, handleToggle);
+  server.on("/getStatus", HTTP_GET, handleGetStatus);
   server.on("/set", HTTP_OPTIONS, handleOptions);
   server.on("/toggle", HTTP_OPTIONS, handleOptions);
+  server.on("/getStatus", HTTP_OPTIONS, handleOptions);
   server.begin();
   Serial.println("HTTP server started");
 }
@@ -690,7 +727,7 @@ String formatTime(int hour, int minute) {
 
 void displayData(int hour, int minute, int second) {
   static unsigned long lastLCDUpdate = 0;
-  const unsigned long lcdUpdateInterval = 5000;
+  const unsigned long lcdUpdateInterval = 1000; // Update every 1 second
   unsigned long currentTime = millis();
 
   if (currentTime - lastLCDUpdate < lcdUpdateInterval) {
@@ -737,7 +774,8 @@ void displayData(int hour, int minute, int second) {
       lcd.setCursor(0, 0);
       lcd.print(timeStr.substring(0, 20));
 
-      if (second % 10 < 5) {
+      // Alternate R1/R2 and R3/R4 every 5 seconds
+      if ((second % 10) < 5) {
         lcd.setCursor(0, 1);
         lcd.print(R1Str.substring(0, 20));
         lcd.setCursor(0, 2);
