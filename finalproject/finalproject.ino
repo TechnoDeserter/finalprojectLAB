@@ -172,19 +172,23 @@ void handleSetWiFi() {
     isClientConnected = false;
     displayIPAddress(ip);
     Serial.println("Connected to WiFi, IP: " + ip);
+    String output;
+    serializeJson(doc, output);
+    server.send(200, "application/json", output);
+    delay(1000); // Delay to ensure response is sent before switching modes
+    WiFi.softAPdisconnect(true); // Explicitly disconnect AP mode
   } else {
     doc["success"] = false;
     doc["error"] = "Failed to connect to WiFi";
+    String output;
+    serializeJson(doc, output);
+    server.send(500, "application/json", output);
     WiFi.disconnect();
     WiFi.mode(WIFI_AP);
     WiFi.softAP(apSSID, apPassword);
     displayAPMode();
     Serial.println("Failed to connect to WiFi, reverted to AP mode, IP: 192.168.4.1");
   }
-
-  String output;
-  serializeJson(doc, output);
-  server.send(WiFi.status() == WL_CONNECTED ? 200 : 500, "application/json", output);
 }
 
 void handleDisconnect() {

@@ -7,7 +7,8 @@ import 'package:wifi_scan/wifi_scan.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:michaelesp32/services/esp32_service.dart';
+import 'package:google_fonts/google_fonts.dart'; // Added for GoogleFonts
+import 'package:michaelesp32/services/esp32_service.dart'; // Adjust path as needed
 
 class Setup extends StatefulWidget {
   const Setup({super.key});
@@ -27,6 +28,10 @@ class _SetupState extends State<Setup> {
   bool _isLoadingWiFi = false;
   String? _configuredSsid;
   bool _isWiFiConnected = false;
+  bool _isScanning = false; // Added for _onRefresh
+  String? _scanStatus; // Added for _onRefresh
+  List<dynamic> _accessPoints = []; // Added for _onRefresh
+  String? _selectedSsid; // Added for _onRefresh
 
   @override
   void initState() {
@@ -156,7 +161,10 @@ class _SetupState extends State<Setup> {
               'password': password,
             }),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 15), onTimeout: () {
+        // Handle timeout as a potential success due to AP mode disconnection
+        return http.Response('{"success": true, "ip": null}', 200);
+      });
 
       print('Response status: ${response.statusCode}, body: ${response.body}');
       if (response.statusCode == 200) {
@@ -174,7 +182,7 @@ class _SetupState extends State<Setup> {
             if (mounted) {
               _showIpModal(context, esp32Service);
               Fluttertoast.showToast(
-                msg: 'WiFi credentials sent successfully. Please enter ESP32 IP.',
+                msg: 'WiFi credentials sent successfully. Please reconnect to your Wi-Fi network and enter the ESP32 IP.',
                 toastLength: Toast.LENGTH_LONG,
                 gravity: ToastGravity.BOTTOM,
                 backgroundColor: Colors.green,
@@ -189,19 +197,127 @@ class _SetupState extends State<Setup> {
         throw Exception('HTTP error: ${response.statusCode} - ${response.body}');
       }
     } catch (e) {
-      Fluttertoast.showToast(
-        msg: 'Error sending WiFi credentials: $e',
-        toastLength: Toast.LENGTH_LONG,
-        gravity: ToastGravity.BOTTOM,
-        backgroundColor: Colors.redAccent,
-        textColor: Colors.white,
-      );
-      print('WiFi configuration error: $e');
+      // Handle network errors as potential successes due to AP mode disconnection
+      if (e.toString().contains('SocketException') || e.toString().contains('TimeoutException')) {
+        await _saveWiFiCredentials();
+        setState(() {
+          _configuredSsid = ssid;
+          _isWiFiConnected = true;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _showIpModal(context, esp32Service);
+            Fluttertoast.showToast(
+              msg: 'WiFi credentials likely sent successfully. Please reconnect to your Wi-Fi network and enter the ESP32 IP.',
+              toastLength: Toast.LENGTH_LONG,
+              gravity: ToastGravity.BOTTOM,
+              backgroundColor: Colors.green,
+              textColor: Colors.white,
+            );
+          }
+        });
+      } else {
+        Fluttertoast.showToast(
+          msg: 'Error sending WiFi credentials: $e',
+          toastLength: Toast.LENGTH_LONG,
+          gravity: ToastGravity.BOTTOM,
+          backgroundColor: Colors.redAccent,
+          textColor: Colors.white,
+        );
+        print('WiFi configuration error: $e');
+      }
     } finally {
       if (mounted) {
         setState(() => _isConnecting = false);
       }
     }
+  }
+
+  void _showIpModal(BuildContext context, ESP32Service esp32Service) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        bool isValid = isValidIp(_espIpController.text);
+        String? errorMessage;
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return AlertDialog(
+              title: const Text('Enter ESP32 IP Address'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Please reconnect to your Wi-Fi network, then enter the IP address displayed on the ESP32.',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _espIpController,
+                    autofocus: true,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      IpAddressInputFormatter(),
+                    ],
+                    decoration: InputDecoration(
+                      labelText: 'ESP32 IP Address',
+                      hintText: 'xxx.xxx.xxx.xxx',
+                      prefixIcon: const Icon(Icons.network_check, color: Colors.purple),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey.shade100,
+                      errorText: errorMessage,
+                    ),
+                    onChanged: (value) {
+                      setModalState(() {
+                        errorMessage = isValidIp(value) ? null : 'Invalid IP (e.g., 192.168.1.1)';
+                        isValid = isValidIp(value);
+                      });
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: _isConnecting || !isValid
+                      ? null
+                      : () async {
+                          await _testConnection(esp32Service);
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.purple,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
+                  child: _isConnecting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text(
+                          'Connect',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _testConnection(ESP32Service esp32Service) async {
@@ -310,108 +426,6 @@ class _SetupState extends State<Setup> {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Text(
-            'WiFi Settings',
-            style: GoogleFonts.roboto(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: Colors.purple[800],
-              letterSpacing: 0.5,
-            ),
-          ),
-          const SizedBox(height: 24),
-          Card(
-            elevation: 4,
-            shadowColor: Colors.purple.withOpacity(0.1),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    controller: _espIpController,
-                    autofocus: true,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [
-                      IpAddressInputFormatter(),
-                    ],
-                    decoration: InputDecoration(
-                      labelText: 'ESP32 IP Address',
-                      hintText: 'xxx.xxx.xxx.xxx',
-                      prefixIcon: const Icon(Icons.network_check, color: Colors.purple),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey.shade100,
-                      errorText: errorMessage,
-                    ),
-                    onChanged: (value) {
-                      setModalState(() {
-                        errorMessage = isValidIp(value) ? null : 'Invalid IP (e.g., 192.168.1.1)';
-                        isValid = isValidIp(value);
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Enter the IP address provided by the ESP32.',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text(
-                    'Cancel',
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ),
-                ElevatedButton(
-                  onPressed: _isConnecting || !isValid
-                      ? null
-                      : () async {
-                          await _testConnection(esp32Service);
-                        },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.purple,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  ),
-                  child: _isConnecting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Text(
-                          'Connect',
-                          style: TextStyle(color: Colors.white),
-                        ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
     return Consumer<ESP32Service>(
       builder: (context, esp32Service, child) {
         return Scaffold(
@@ -439,7 +453,7 @@ class _SetupState extends State<Setup> {
                       ),
                       const SizedBox(height: 20),
                       if (_isChecking || esp32Service.isReconnecting) ...[
-                        const Center(child: CircularProgressIndicator()),
+                        acceleratesenter(child: CircularProgressIndicator()),
                       ] else if (!esp32Service.isConnected) ...[
                         Row(
                           children: [
@@ -473,7 +487,7 @@ class _SetupState extends State<Setup> {
                                   }
                                 },
                                 hint: _isLoadingWiFi
-                                    ? const Text('Scanning WiFi...')
+                                    ?加速const Text('Scanning WiFi...')
                                     : const Text('Select WiFi Network'),
                               ),
                             ),
@@ -631,6 +645,7 @@ class _SetupState extends State<Setup> {
 class IpAddressInputFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+Jon {
     String text = newValue.text.replaceAll(RegExp(r'[^0-9.]'), '');
     String formatted = '';
     int selectionIndex = newValue.selection.baseOffset;
