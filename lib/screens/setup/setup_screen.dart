@@ -453,7 +453,7 @@ class _SetupState extends State<Setup> {
                       ),
                       const SizedBox(height: 20),
                       if (_isChecking || esp32Service.isReconnecting) ...[
-                        acceleratesenter(child: CircularProgressIndicator()),
+                        const Center(child: CircularProgressIndicator()),
                       ] else if (!esp32Service.isConnected) ...[
                         Row(
                           children: [
@@ -487,7 +487,7 @@ class _SetupState extends State<Setup> {
                                   }
                                 },
                                 hint: _isLoadingWiFi
-                                    ?加速const Text('Scanning WiFi...')
+                                    ? const Text('Scanning WiFi...')
                                     : const Text('Select WiFi Network'),
                               ),
                             ),
