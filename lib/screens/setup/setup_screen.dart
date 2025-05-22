@@ -8,7 +8,7 @@ import 'package:animate_do/animate_do.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart'; // Added for GoogleFonts
-import 'package:michaelesp32/services/esp32_service.dart'; // Adjust path as needed
+import 'package:michaelesp32/services/services.dart';
 
 class Setup extends StatefulWidget {
   const Setup({super.key});
