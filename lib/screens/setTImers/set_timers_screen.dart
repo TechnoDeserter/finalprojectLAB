@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -25,18 +26,27 @@ class SetTimeRelays extends StatefulWidget {
   _SetTimeRelaysState createState() => _SetTimeRelaysState();
 }
 
-class _SetTimeRelaysState extends State<SetTimeRelays> {
+class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProviderStateMixin {
   late stt.SpeechToText _speech;
   bool _speechRecognitionAvailable = false;
   bool _isListening = false;
   String _transcription = '';
-  String _statusMessage = 'Tap to speak';
+  String _statusMessage = 'Initializing speech recognition...';
+  late AnimationController _animationController;
+  late Animation<double> _micAnimation;
 
   @override
   void initState() {
     super.initState();
     _speech = stt.SpeechToText();
     _initializeSpeech();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..repeat(reverse: true);
+    _micAnimation = Tween<double>(begin: 1.0, end: 1.3).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
   }
 
   void _initializeSpeech() async {
@@ -47,26 +57,49 @@ class _SetTimeRelaysState extends State<SetTimeRelays> {
           setState(() {
             _isListening = status == 'listening';
             _statusMessage = _isListening ? 'Listening...' : 'Tap to speak';
+            if (_isListening) {
+              _animationController.repeat(reverse: true);
+            } else {
+              _animationController.stop();
+              _animationController.value = 1.0;
+            }
           });
         },
         onError: (error) {
           print('Speech error: $error');
           setState(() {
             _isListening = false;
-            _statusMessage = 'Error: ${error.errorMsg}';
+            _statusMessage = 'Speech error: ${error.errorMsg}';
+            _animationController.stop();
+            _animationController.value = 1.0;
           });
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text('Speech recognition error: ${error.errorMsg}')),
+            SnackBar(content: Text('Speech recognition error: ${error.errorMsg}')),
           );
         },
+        debugLogging: true,
       );
+
       setState(() {
         _speechRecognitionAvailable = available;
+        _statusMessage = available ? 'Tap to speak' : 'Speech recognition unavailable';
       });
+
+      if (!available) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to initialize speech recognition. Please check device settings.'),
+          ),
+        );
+      }
+
       print('Speech recognition available: $available');
     } catch (e) {
       print('Error initializing speech recognition: $e');
+      setState(() {
+        _speechRecognitionAvailable = false;
+        _statusMessage = 'Failed to initialize speech recognition';
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to initialize speech recognition: $e')),
       );
@@ -94,10 +127,18 @@ class _SetTimeRelaysState extends State<SetTimeRelays> {
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    _isListening ? Icons.mic : Icons.mic_none,
-                    size: 48,
-                    color: _isListening ? Colors.red[600] : Colors.purple[600],
+                  AnimatedBuilder(
+                    animation: _micAnimation,
+                    builder: (context, child) {
+                      return Transform.scale(
+                        scale: _isListening ? _micAnimation.value : 1.0,
+                        child: Icon(
+                          _isListening ? Icons.mic : Icons.mic_none,
+                          size: 48,
+                          color: _isListening ? Colors.red[600] : Colors.purple[600],
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 10),
                   Text(
@@ -110,11 +151,12 @@ class _SetTimeRelaysState extends State<SetTimeRelays> {
                   const SizedBox(height: 10),
                   Text(
                     _transcription.isEmpty
-                        ? 'Say something like "Set relay 1 on time to 08:30"'
+                        ? 'Say "Turn on Relay 1" or "Set Relay 1 off time to 08:30"'
                         : _transcription,
                     style: GoogleFonts.roboto(
                       fontSize: 14,
-                      color: Colors.grey[800],
+                      color: _transcription.isEmpty ? Colors.grey[800] : Colors.grey[600],
+                      fontStyle: _transcription.isEmpty ? FontStyle.italic : FontStyle.normal,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -136,72 +178,107 @@ class _SetTimeRelaysState extends State<SetTimeRelays> {
                     ),
                   ),
                 ),
-                if (!_isListening)
-                  TextButton(
-                    onPressed: () {
-                      setModalState(() {
-                        _transcription = '';
-                        _statusMessage = 'Tap to speak';
-                      });
-                      _startListening();
-                    },
-                    child: Text(
-                      'Speak Again',
-                      style: GoogleFonts.roboto(
-                        fontSize: 16,
-                        color: Colors.purple[600],
-                      ),
+                TextButton(
+                  onPressed: _speechRecognitionAvailable
+                      ? () {
+                          setModalState(() {
+                            _transcription = '';
+                            _statusMessage = 'Tap to speak';
+                          });
+                          _startListening(setModalState);
+                        }
+                      : null,
+                  child: Text(
+                    _isListening ? 'Listening...' : 'Speak',
+                    style: GoogleFonts.roboto(
+                      fontSize: 16,
+                      color: _speechRecognitionAvailable ? Colors.purple[600] : Colors.grey,
                     ),
                   ),
+                ),
               ],
             );
           },
         );
       },
-    );
+    ).then((_) {
+      _stopListening();
+      _animationController.stop();
+      _animationController.value = 1.0;
+      setState(() {
+        _transcription = '';
+        _statusMessage = _speechRecognitionAvailable ? 'Tap to speak' : 'Speech recognition unavailable';
+      });
+    });
   }
 
-  void _startListening() async {
-    if (_speechRecognitionAvailable && !_isListening) {
-      var status = await Permission.microphone.request();
-      if (status.isGranted) {
-        try {
-          await _speech.listen(
-            onResult: (result) {
-              print('Recognition result: ${result.recognizedWords}');
-              setState(() {
-                _transcription = result.recognizedWords;
-                if (result.finalResult) {
-                  _isListening = false;
-                  _statusMessage = 'Processing command...';
-                  _processVoiceCommand(result.recognizedWords);
-                }
-              });
-            },
-            localeId: 'en_US',
-          );
-        } catch (e) {
-          print('Error starting speech recognition: $e');
-          setState(() {
-            _statusMessage = 'Error: $e';
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to start speech recognition: $e')),
-          );
-        }
-      } else {
-        setState(() {
-          _statusMessage = 'Microphone permission denied';
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Microphone permission denied')),
-        );
-      }
-    } else {
-      print('Speech recognition not available or already listening');
+  void _startListening(StateSetter setModalState) async {
+    if (!_speechRecognitionAvailable) {
       setState(() {
         _statusMessage = 'Speech recognition not available';
       });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Speech recognition not available')),
+      );
+      return;
+    }
+
+    if (_isListening) {
+      print('Already listening');
+      return;
+    }
+
+    var status = await Permission.microphone.request();
+    if (status.isGranted) {
+      try {
+        setState(() {
+          _isListening = true;
+          _statusMessage = 'Listening...';
+          _animationController.repeat(reverse: true);
+        });
+        await _speech.listen(
+          onResult: (result) {
+            print('Recognition result: ${result.recognizedWords}, final: ${result.finalResult}');
+            setModalState(() {
+              _transcription = result.recognizedWords;
+            });
+            if (result.finalResult) {
+              setState(() {
+                _isListening = false;
+                _statusMessage = 'Processing command...';
+                _animationController.stop();
+                _animationController.value = 1.0;
+                _processVoiceCommand(result.recognizedWords);
+              });
+            }
+          },
+          localeId: 'en_US',
+          cancelOnError: true,
+          partialResults: true,
+        );
+      } catch (e) {
+        print('Error starting speech recognition: $e');
+        setState(() {
+          _isListening = false;
+          _statusMessage = 'Error: $e';
+          _animationController.stop();
+          _animationController.value = 1.0;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to start speech recognition: $e')),
+        );
+      }
+    } else {
+      setState(() {
+        _isListening = false;
+        _statusMessage = 'Microphone permission denied';
+        _animationController.stop();
+        _animationController.value = 1.0;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Microphone permission denied. Please enable in settings.')),
+      );
+      await openAppSettings();
     }
   }
 
@@ -209,10 +286,19 @@ class _SetTimeRelaysState extends State<SetTimeRelays> {
     if (_isListening) {
       try {
         await _speech.stop();
+        setState(() {
+          _isListening = false;
+          _statusMessage = _speechRecognitionAvailable ? 'Tap to speak' : 'Speech recognition unavailable';
+          _animationController.stop();
+          _animationController.value = 1.0;
+        });
       } catch (e) {
         print('Error stopping speech recognition: $e');
         setState(() {
+          _isListening = false;
           _statusMessage = 'Error stopping: $e';
+          _animationController.stop();
+          _animationController.value = 1.0;
         });
       }
     }
@@ -220,14 +306,60 @@ class _SetTimeRelaysState extends State<SetTimeRelays> {
 
   void _processVoiceCommand(String command) {
     print('Processing command: $command');
-    final regex = RegExp(r'set relay (\d+) (on|off) time to (\d{2}):(\d{2})',
-        caseSensitive: false);
-    final match = regex.firstMatch(command);
-    if (match != null) {
-      final relayNumber = int.parse(match.group(1)!) - 1;
-      final isOnTime = match.group(2)!.toLowerCase() == 'on';
-      final hour = int.parse(match.group(3)!);
-      final minute = int.parse(match.group(4)!);
+    // Normalize command: convert to lowercase, handle common mis-transcriptions
+    command = command.toLowerCase().trim();
+    command = command
+        .replaceAll('one', '1')
+        .replaceAll('two', '2')
+        .replaceAll('three', '3')
+        .replaceAll('tree', '3') // Handle "three" mis-transcribed as "tree"
+        .replaceAll('four', '4')
+        .replaceAll('for', '4'); // Handle "four" mis-transcribed as "for"
+
+
+    // Regex for scheduling command: "set relay X on/off time to HH:MM"
+    final scheduleRegex = RegExp(
+      r'set relay (\d+) (on|off) time to (\d{1,2}):(\d{2})',
+      caseSensitive: false,
+    );
+    final scheduleMatch = scheduleRegex.firstMatch(command);
+
+    // Regex for toggle command: "turn on/off relay X"
+    final toggleRegex = RegExp(
+      r'turn (on|off) relay (\d+)',
+      caseSensitive: false,
+    );
+    final toggleMatch = toggleRegex.firstMatch(command);
+
+    if (toggleMatch != null) {
+      final state = toggleMatch.group(1)! == 'on';
+      final relayNumber = int.parse(toggleMatch.group(2)!) - 1;
+      print('Toggle match: state=$state, relayNumber=$relayNumber');
+
+      if (relayNumber >= 0 && relayNumber < widget.relayStates.length) {
+        widget.toggleRelay(relayNumber, state);
+        setState(() {
+          _statusMessage = 'Command processed successfully';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Turned Relay ${relayNumber + 1} ${state ? "ON" : "OFF"}'),
+          ),
+        );
+      } else {
+        setState(() {
+          _statusMessage = 'Invalid relay number';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid relay number')),
+        );
+      }
+    } else if (scheduleMatch != null) {
+      final relayNumber = int.parse(scheduleMatch.group(1)!) - 1;
+      final isOnTime = scheduleMatch.group(2)! == 'on';
+      final hour = int.parse(scheduleMatch.group(3)!);
+      final minute = int.parse(scheduleMatch.group(4)!);
+      print('Schedule match: relayNumber=$relayNumber, isOnTime=$isOnTime, time=$hour:$minute');
 
       if (relayNumber >= 0 &&
           relayNumber < widget.onTimes.length &&
@@ -242,8 +374,10 @@ class _SetTimeRelaysState extends State<SetTimeRelays> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text(
-                  'Set Relay ${relayNumber + 1} ${isOnTime ? "ON" : "OFF"} time to ${_formatTime(time)}')),
+            content: Text(
+              'Set Relay ${relayNumber + 1} ${isOnTime ? "ON" : "OFF"} time to ${_formatTime(time)}',
+            ),
+          ),
         );
       } else {
         setState(() {
@@ -260,11 +394,18 @@ class _SetTimeRelaysState extends State<SetTimeRelays> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Heard: $command')),
       );
+      print('No regex match for command: $command');
     }
   }
 
   String _formatTime(TimeOfDay time) {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
   }
 
   Widget _buildRelayControl(int index, BuildContext context) {
@@ -465,15 +606,21 @@ class _SetTimeRelaysState extends State<SetTimeRelays> {
               ),
               const SizedBox(height: 15),
               ElevatedButton(
-                onPressed: () => _showVoiceModal(context),
+                onPressed: _speechRecognitionAvailable
+                    ? () {
+                        _showVoiceModal(context);
+                        Future.delayed(const Duration(milliseconds: 300), () {
+                          _startListening((_) {});
+                        });
+                      }
+                    : null,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.purple[600],
+                  backgroundColor: _speechRecognitionAvailable ? Colors.purple[600] : Colors.grey,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(15),
                   ),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   elevation: 4,
                   minimumSize: const Size(150, 48),
                 ),
@@ -484,35 +631,6 @@ class _SetTimeRelaysState extends State<SetTimeRelays> {
                     const SizedBox(width: 8),
                     Text(
                       'Voice Command',
-                      style: GoogleFonts.roboto(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 15),
-              ElevatedButton(
-                onPressed: widget.sendSettingsToESP,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.purple[600],
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  elevation: 4,
-                  minimumSize: const Size(150, 48),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.save, size: 20, color: Colors.white),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Set All Times',
                       style: GoogleFonts.roboto(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,

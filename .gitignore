@@ -67,3 +67,4 @@ windows/flutter/generated_plugins.cmake
 *.swift
 *.cc
 *.cmake
+pubspec.lock

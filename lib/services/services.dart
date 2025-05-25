@@ -9,14 +9,14 @@ class ESP32Service with ChangeNotifier {
   bool _isConnected = false;
   bool _isReconnecting = false;
   String? _ssid;
-  List<bool> _relayStates = [false, false, false, false];
-  List<TimeOfDay> _onTimes = [
+  final List<bool> _relayStates = [false, false, false, false];
+  final List<TimeOfDay> _onTimes = [
     const TimeOfDay(hour: 8, minute: 0),
     const TimeOfDay(hour: 9, minute: 0),
     const TimeOfDay(hour: 10, minute: 0),
     const TimeOfDay(hour: 11, minute: 0),
   ];
-  List<TimeOfDay> _offTimes = [
+  final List<TimeOfDay> _offTimes = [
     const TimeOfDay(hour: 18, minute: 0),
     const TimeOfDay(hour: 19, minute: 0),
     const TimeOfDay(hour: 20, minute: 0),
@@ -77,6 +77,7 @@ class ESP32Service with ChangeNotifier {
         _isConnected = false;
       }
     } catch (e) {
+      print('Error reconnecting: $e');
       _isConnected = false;
     }
     _isReconnecting = false;
@@ -111,13 +112,99 @@ class ESP32Service with ChangeNotifier {
     await _fetchStatus();
   }
 
+  Future<bool> setSchedule(List<TimeOfDay> onTimes, List<TimeOfDay> offTimes) async {
+    if (_esp32IP == null || !_isConnected) {
+      print('Cannot set schedule: Not connected to ESP32');
+      return false;
+    }
+
+    try {
+      final Map<String, String> data = {
+        'onTime1': _formatTime(onTimes[0]),
+        'offTime1': _formatTime(offTimes[0]),
+        'onTime2': _formatTime(onTimes[1]),
+        'offTime2': _formatTime(offTimes[1]),
+        'onTime3': _formatTime(onTimes[2]),
+        'offTime3': _formatTime(offTimes[2]),
+        'onTime4': _formatTime(onTimes[3]),
+        'offTime4': _formatTime(offTimes[3]),
+      };
+      print('Sending schedule to ESP32: $data');
+      final response = await http
+          .post(
+            Uri.parse('http://$_esp32IP/set'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(data),
+          )
+          .timeout(const Duration(seconds: 10));
+      print('ESP32 response: status=${response.statusCode}, body=${response.body}');
+
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        if (responseData['success'] == true) {
+          await _fetchStatus(); // Sync state after setting
+          return true;
+        } else {
+          print('Failed to set schedule: ${responseData['error']}');
+          return false;
+        }
+      } else {
+        print('Failed to set schedule: HTTP ${response.statusCode}');
+        return false;
+      }
+    } catch (e) {
+      print('Error setting schedule: $e');
+      return false;
+    }
+  }
+
+  Future<bool> setSingleRelaySchedule(int relayIndex, bool isOnTime, TimeOfDay time) async {
+    if (_esp32IP == null || !_isConnected) {
+      print('Cannot set single relay schedule: Not connected to ESP32');
+      return false;
+    }
+
+    try {
+      final Map<String, String> data = {
+        'relay': (relayIndex + 1).toString(),
+        'type': isOnTime ? 'onTime' : 'offTime',
+        'time': _formatTime(time),
+      };
+      print('Sending single relay schedule to ESP32: $data');
+      final response = await http
+          .post(
+            Uri.parse('http://$_esp32IP/setSingle'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(data),
+          )
+          .timeout(const Duration(seconds: 5));
+      print('ESP32 response: status=${response.statusCode}, body=${response.body}');
+
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        if (responseData['success'] == true) {
+          await _fetchStatus(); // Sync state after setting
+          return true;
+        } else {
+          print('Failed to set single relay schedule: ${responseData['error']}');
+          return false;
+        }
+      } else {
+        print('Failed to set single relay schedule: HTTP ${response.statusCode}');
+        return false;
+      }
+    } catch (e) {
+      print('Error setting single relay schedule: $e');
+      return false;
+    }
+  }
+
   Future<void> toggleRelay(int index, bool value) async {
     if (_esp32IP == null || !_isConnected) {
       print('Cannot toggle relay: Not connected to ESP32');
       return;
     }
 
-    // Optimistically update the UI
     final previousState = _relayStates[index];
     _relayStates[index] = value;
     notifyListeners();
@@ -137,23 +224,24 @@ class ESP32Service with ChangeNotifier {
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
         if (responseData['success'] != true) {
-          // Revert optimistic update on failure
           _relayStates[index] = previousState;
           notifyListeners();
           print('Failed to toggle relay: ${responseData['error']}');
         }
       } else {
-        // Revert optimistic update on HTTP error
         _relayStates[index] = previousState;
         notifyListeners();
         print('Failed to toggle relay: HTTP ${response.statusCode}');
       }
     } catch (e) {
-      // Revert optimistic update on exception
       _relayStates[index] = previousState;
       notifyListeners();
       print('Error toggling relay: $e');
     }
+  }
+
+  String _formatTime(TimeOfDay time) {
+    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
 
   TimeOfDay _parseTime(String time) {

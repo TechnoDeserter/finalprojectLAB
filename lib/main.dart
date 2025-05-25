@@ -1,12 +1,10 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:michaelesp32/screens/setTimers/set_timers_screen.dart';
 import 'package:michaelesp32/screens/setup/setup_screen.dart';
-import 'package:michaelesp32/common/widgets/navbar.dart';
 import 'package:michaelesp32/services/services.dart';
+import 'package:michaelesp32/common/widgets/navbar.dart';
 
 void main() {
   runApp(
@@ -46,47 +44,34 @@ class RelayControlPage extends StatefulWidget {
 
 class _RelayControlPageState extends State<RelayControlPage> {
   int _selectedIndex = 0;
+  bool _isSending = false; // Debounce flag
 
   Future<void> _sendSettingsToESP(String ip, List<TimeOfDay> onTimes, List<TimeOfDay> offTimes) async {
+    if (_isSending) return;
+    if (ip.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error: ESP32 IP not set')),
+      );
+      return;
+    }
+    _isSending = true;
     try {
-      final Map<String, String> data = {
-        'onTime1': _formatTime(onTimes[0]),
-        'offTime1': _formatTime(offTimes[0]),
-        'onTime2': _formatTime(onTimes[1]),
-        'offTime2': _formatTime(offTimes[1]),
-        'onTime3': _formatTime(onTimes[2]),
-        'offTime3': _formatTime(offTimes[2]),
-        'onTime4': _formatTime(onTimes[3]),
-        'offTime4': _formatTime(offTimes[3]),
-      };
-
-      final response = await http
-          .post(
-            Uri.parse('http://$ip/set'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(data),
-          )
-          .timeout(
-            const Duration(seconds: 5),
-            onTimeout: () => http.Response('Timeout', 408),
-          );
-
-      if (response.statusCode == 200) {
-        final responseData = jsonDecode(response.body);
-        if (responseData['success'] == true) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Settings saved successfully!')),
-          );
-        } else {
-          throw Exception('Failed to save settings: ${responseData['error']}');
-        }
+      final success = await Provider.of<ESP32Service>(context, listen: false).setSchedule(onTimes, offTimes);
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Settings saved successfully!')),
+        );
       } else {
-        throw Exception('Failed to save settings: HTTP ${response.statusCode}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to save settings')),
+        );
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error saving settings: $e')),
       );
+    } finally {
+      _isSending = false;
     }
   }
 
@@ -142,35 +127,49 @@ class _RelayControlPageState extends State<RelayControlPage> {
                     onTimes: esp32Service.onTimes,
                     offTimes: esp32Service.offTimes,
                     relayStates: esp32Service.relayStates,
-                    selectTime: (context, relayIndex, isOnTime, {TimeOfDay? voiceSelectedTime}) {
+                    selectTime: (context, relayIndex, isOnTime, {TimeOfDay? voiceSelectedTime}) async {
                       if (voiceSelectedTime != null) {
                         if (isOnTime) {
                           esp32Service.onTimes[relayIndex] = voiceSelectedTime;
                         } else {
                           esp32Service.offTimes[relayIndex] = voiceSelectedTime;
                         }
+                        // Send immediately for voice commands
+                        await esp32Service.setSingleRelaySchedule(relayIndex, isOnTime, voiceSelectedTime);
                         esp32Service.notifyListeners();
                       } else {
-                        showTimePicker(
+                        // Store previous times for potential revert
+                        final previousOnTime = esp32Service.onTimes[relayIndex];
+                        final previousOffTime = esp32Service.offTimes[relayIndex];
+                        final picked = await showTimePicker(
                           context: context,
                           initialTime: isOnTime
                               ? esp32Service.onTimes[relayIndex]
                               : esp32Service.offTimes[relayIndex],
-                        ).then((picked) {
-                          if (picked != null) {
-                            if (isOnTime) {
-                              esp32Service.onTimes[relayIndex] = picked;
-                            } else {
-                              esp32Service.offTimes[relayIndex] = picked;
-                            }
-                            esp32Service.notifyListeners();
+                        );
+                        if (picked != null) {
+                          if (isOnTime) {
+                            esp32Service.onTimes[relayIndex] = picked;
+                          } else {
+                            esp32Service.offTimes[relayIndex] = picked;
                           }
-                        });
+                          // Send immediately to ESP32
+                          await esp32Service.setSingleRelaySchedule(relayIndex, isOnTime, picked);
+                          esp32Service.notifyListeners();
+                        } else {
+                          // Revert to previous times if canceled
+                          if (isOnTime) {
+                            esp32Service.onTimes[relayIndex] = previousOnTime;
+                          } else {
+                            esp32Service.offTimes[relayIndex] = previousOffTime;
+                          }
+                          esp32Service.notifyListeners();
+                        }
                       }
                     },
                     toggleRelay: (index, value) => _toggleRelay(esp32Service, index, value),
                     sendSettingsToESP: () => _sendSettingsToESP(
-                        esp32Service.esp32IP ?? '192.168.4.1',
+                        esp32Service.esp32IP ?? '',
                         esp32Service.onTimes,
                         esp32Service.offTimes),
                   )

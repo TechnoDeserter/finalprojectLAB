@@ -7,7 +7,7 @@ import 'package:wifi_scan/wifi_scan.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:google_fonts/google_fonts.dart'; // Added for GoogleFonts
+// Added for GoogleFonts
 import 'package:michaelesp32/services/services.dart';
 
 class Setup extends StatefulWidget {
