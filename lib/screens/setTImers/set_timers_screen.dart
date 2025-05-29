@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -8,7 +7,8 @@ class SetTimeRelays extends StatefulWidget {
   final List<TimeOfDay> onTimes;
   final List<TimeOfDay> offTimes;
   final List<bool> relayStates;
-  final Function(BuildContext, int, bool, {TimeOfDay? voiceSelectedTime}) selectTime;
+  final Function(BuildContext, int, bool, {TimeOfDay? voiceSelectedTime})
+      selectTime;
   final Function(int, bool) toggleRelay;
   final Function() sendSettingsToESP;
 
@@ -26,7 +26,8 @@ class SetTimeRelays extends StatefulWidget {
   _SetTimeRelaysState createState() => _SetTimeRelaysState();
 }
 
-class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProviderStateMixin {
+class _SetTimeRelaysState extends State<SetTimeRelays>
+    with SingleTickerProviderStateMixin {
   late stt.SpeechToText _speech;
   bool _speechRecognitionAvailable = false;
   bool _isListening = false;
@@ -74,7 +75,8 @@ class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProvider
             _animationController.value = 1.0;
           });
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Speech recognition error: ${error.errorMsg}')),
+            SnackBar(
+                content: Text('Speech recognition error: ${error.errorMsg}')),
           );
         },
         debugLogging: true,
@@ -82,13 +84,15 @@ class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProvider
 
       setState(() {
         _speechRecognitionAvailable = available;
-        _statusMessage = available ? 'Tap to speak' : 'Speech recognition unavailable';
+        _statusMessage =
+            available ? 'Tap to speak' : 'Speech recognition unavailable';
       });
 
       if (!available) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Failed to initialize speech recognition. Please check device settings.'),
+            content: Text(
+                'Failed to initialize speech recognition. Please check device settings.'),
           ),
         );
       }
@@ -135,7 +139,9 @@ class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProvider
                         child: Icon(
                           _isListening ? Icons.mic : Icons.mic_none,
                           size: 48,
-                          color: _isListening ? Colors.red[600] : Colors.purple[600],
+                          color: _isListening
+                              ? Colors.red[600]
+                              : Colors.purple[600],
                         ),
                       );
                     },
@@ -155,8 +161,12 @@ class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProvider
                         : _transcription,
                     style: GoogleFonts.roboto(
                       fontSize: 14,
-                      color: _transcription.isEmpty ? Colors.grey[800] : Colors.grey[600],
-                      fontStyle: _transcription.isEmpty ? FontStyle.italic : FontStyle.normal,
+                      color: _transcription.isEmpty
+                          ? Colors.grey[800]
+                          : Colors.grey[600],
+                      fontStyle: _transcription.isEmpty
+                          ? FontStyle.italic
+                          : FontStyle.normal,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -192,7 +202,9 @@ class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProvider
                     _isListening ? 'Listening...' : 'Speak',
                     style: GoogleFonts.roboto(
                       fontSize: 16,
-                      color: _speechRecognitionAvailable ? Colors.purple[600] : Colors.grey,
+                      color: _speechRecognitionAvailable
+                          ? Colors.purple[600]
+                          : Colors.grey,
                     ),
                   ),
                 ),
@@ -207,7 +219,9 @@ class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProvider
       _animationController.value = 1.0;
       setState(() {
         _transcription = '';
-        _statusMessage = _speechRecognitionAvailable ? 'Tap to speak' : 'Speech recognition unavailable';
+        _statusMessage = _speechRecognitionAvailable
+            ? 'Tap to speak'
+            : 'Speech recognition unavailable';
       });
     });
   }
@@ -238,7 +252,8 @@ class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProvider
         });
         await _speech.listen(
           onResult: (result) {
-            print('Recognition result: ${result.recognizedWords}, final: ${result.finalResult}');
+            print(
+                'Recognition result: ${result.recognizedWords}, final: ${result.finalResult}');
             setModalState(() {
               _transcription = result.recognizedWords;
             });
@@ -276,7 +291,9 @@ class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProvider
         _animationController.value = 1.0;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Microphone permission denied. Please enable in settings.')),
+        const SnackBar(
+            content: Text(
+                'Microphone permission denied. Please enable in settings.')),
       );
       await openAppSettings();
     }
@@ -288,7 +305,9 @@ class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProvider
         await _speech.stop();
         setState(() {
           _isListening = false;
-          _statusMessage = _speechRecognitionAvailable ? 'Tap to speak' : 'Speech recognition unavailable';
+          _statusMessage = _speechRecognitionAvailable
+              ? 'Tap to speak'
+              : 'Speech recognition unavailable';
           _animationController.stop();
           _animationController.value = 1.0;
         });
@@ -309,13 +328,52 @@ class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProvider
     // Normalize command: convert to lowercase, handle common mis-transcriptions
     command = command.toLowerCase().trim();
     command = command
+        // Normalize single-digit numbers
+        .replaceAll('zero', '0')
+        .replaceAll('oh', '0') // Handle "oh" for zero
         .replaceAll('one', '1')
         .replaceAll('two', '2')
         .replaceAll('three', '3')
-        .replaceAll('tree', '3') // Handle "three" mis-transcribed as "tree"
+        .replaceAll('tree', '3') // Handle mis-transcription
         .replaceAll('four', '4')
-        .replaceAll('for', '4'); // Handle "four" mis-transcribed as "for"
+        .replaceAll('for', '4') // Handle mis-transcription
+        .replaceAll('five', '5')
+        .replaceAll('six', '6')
+        .replaceAll('seven', '7')
+        .replaceAll('eight', '8')
+        .replaceAll('nine', '9')
+        // Normalize tens
+        .replaceAll('ten', '10')
+        .replaceAll('of', 'OFF')
+        .replaceAll('eleven', '11')
+        .replaceAll('twelve', '12')
+        .replaceAll('thirteen', '13')
+        .replaceAll('fourteen', '14')
+        .replaceAll('fifteen', '15')
+        .replaceAll('sixteen', '16')
+        .replaceAll('seventeen', '17')
+        .replaceAll('eighteen', '18')
+        .replaceAll('nineteen', '19')
+        .replaceAll('twenty', '20')
+        .replaceAll('twenty one', '21')
+        .replaceAll('twenty two', '22')
+        .replaceAll('twenty three', '23')
+        // Handle minutes
+        .replaceAll('hundred', ':00') // e.g., "fourteen hundred" -> "14:00"
+        .replaceAll('ten', ':10') // Replace after single-digit numbers
+        .replaceAll('twenty', ':20')
+        .replaceAll('thirty', ':30')
+        .replaceAll('forty', ':40')
+        .replaceAll('fifty', ':50')
+        // Clean up spaces around colon
+        .replaceAll(' : ', ':');
 
+    // Regex for scheduling command with "and": "set relay X on/off time to HH and MM"
+    final andScheduleRegex = RegExp(
+      r'set relay (\d+) (on|off) time to (\d{1,2}) and (\d{1,2})',
+      caseSensitive: false,
+    );
+    final andScheduleMatch = andScheduleRegex.firstMatch(command);
 
     // Regex for scheduling command: "set relay X on/off time to HH:MM"
     final scheduleRegex = RegExp(
@@ -343,7 +401,8 @@ class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProvider
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Turned Relay ${relayNumber + 1} ${state ? "ON" : "OFF"}'),
+            content:
+                Text('Turned Relay ${relayNumber + 1} ${state ? "ON" : "OFF"}'),
           ),
         );
       } else {
@@ -354,12 +413,13 @@ class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProvider
           const SnackBar(content: Text('Invalid relay number')),
         );
       }
-    } else if (scheduleMatch != null) {
-      final relayNumber = int.parse(scheduleMatch.group(1)!) - 1;
-      final isOnTime = scheduleMatch.group(2)! == 'on';
-      final hour = int.parse(scheduleMatch.group(3)!);
-      final minute = int.parse(scheduleMatch.group(4)!);
-      print('Schedule match: relayNumber=$relayNumber, isOnTime=$isOnTime, time=$hour:$minute');
+    } else if (andScheduleMatch != null) {
+      final relayNumber = int.parse(andScheduleMatch.group(1)!) - 1;
+      final isOnTime = andScheduleMatch.group(2)! == 'on';
+      final hour = int.parse(andScheduleMatch.group(3)!);
+      final minute = int.parse(andScheduleMatch.group(4)!);
+      print(
+          'And schedule match: relayNumber=$relayNumber, isOnTime=$isOnTime, time=$hour:$minute');
 
       if (relayNumber >= 0 &&
           relayNumber < widget.onTimes.length &&
@@ -368,7 +428,43 @@ class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProvider
           minute >= 0 &&
           minute <= 59) {
         final time = TimeOfDay(hour: hour, minute: minute);
-        widget.selectTime(context, relayNumber, isOnTime, voiceSelectedTime: time);
+        widget.selectTime(context, relayNumber, isOnTime,
+            voiceSelectedTime: time);
+        setState(() {
+          _statusMessage = 'Command processed successfully';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Set Relay ${relayNumber + 1} ${isOnTime ? "ON" : "OFF"} time to ${_formatTime(time)}',
+            ),
+          ),
+        );
+      } else {
+        setState(() {
+          _statusMessage = 'Invalid relay number or time';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid relay number or time')),
+        );
+      }
+    } else if (scheduleMatch != null) {
+      final relayNumber = int.parse(scheduleMatch.group(1)!) - 1;
+      final isOnTime = scheduleMatch.group(2)! == 'on';
+      final hour = int.parse(scheduleMatch.group(3)!);
+      final minute = int.parse(scheduleMatch.group(4)!);
+      print(
+          'Schedule match: relayNumber=$relayNumber, isOnTime=$isOnTime, time=$hour:$minute');
+
+      if (relayNumber >= 0 &&
+          relayNumber < widget.onTimes.length &&
+          hour >= 0 &&
+          hour <= 23 &&
+          minute >= 0 &&
+          minute <= 59) {
+        final time = TimeOfDay(hour: hour, minute: minute);
+        widget.selectTime(context, relayNumber, isOnTime,
+            voiceSelectedTime: time);
         setState(() {
           _statusMessage = 'Command processed successfully';
         });
@@ -615,12 +711,15 @@ class _SetTimeRelaysState extends State<SetTimeRelays> with SingleTickerProvider
                       }
                     : null,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _speechRecognitionAvailable ? Colors.purple[600] : Colors.grey,
+                  backgroundColor: _speechRecognitionAvailable
+                      ? Colors.purple[600]
+                      : Colors.grey,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(15),
                   ),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   elevation: 4,
                   minimumSize: const Size(150, 48),
                 ),
